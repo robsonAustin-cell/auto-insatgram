@@ -1,0 +1,74 @@
+name: Auto Post 3 Reels a Day
+
+on:
+  schedule:
+    # Runs 3 times daily (EST / Toronto time):
+    # 14:00 UTC = 9:00 AM EST
+    # 19:00 UTC = 2:00 PM EST
+    # 00:00 UTC = 7:00 PM EST
+    - cron: '0 14,19,0 * * *'
+  workflow_dispatch: # Lets you click "Run workflow" anytime to test
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install instagram-simple-post
+        run: pip install instagram-simple-post
+
+      - name: Pick next video and post Reel to Instagram
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: |
+          python - << 'EOF'
+          import os, glob, shutil, subprocess, urllib.parse
+
+          os.makedirs("queue", exist_ok=True)
+          os.makedirs("posted", exist_ok=True)
+
+          videos = sorted(glob.glob("queue/*.mp4") + glob.glob("queue/*.mov"))
+          if not videos:
+              print("No .mp4 or .mov videos left in queue/ folder.")
+              exit(0)
+
+          video = videos[0]
+          caption = os.path.splitext(os.path.basename(video))[0].replace("_", " ")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          encoded_path = urllib.parse.quote(video)
+          video_url = f"https://githubusercontent.com{repo}/main/{encoded_path}"
+
+          print(f"Posting Reel {video} with caption: {caption}")
+          subprocess.run([
+              "instagram-simple-post", "post-reel",
+              "--user-id", os.environ["IG_USER_ID"],
+              "--access-token", os.environ["IG_ACCESS_TOKEN"],
+              "--video-url", video_url,
+              "--caption", caption
+          ], check=True)
+
+          shutil.move(video, os.path.join("posted", os.path.basename(video)))
+          EOF
+
+      - name: Move posted video to posted/ folder
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@://github.com"
+          git add .
+          git commit -m "Mark video as posted" || exit 0
+          git push
+
+
+
+
